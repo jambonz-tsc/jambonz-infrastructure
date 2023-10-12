@@ -91,11 +91,6 @@
     },
     {
       "type": "shell",
-      "execute_command": "chmod +x {{ .Path }}; sudo '{{ .Path }}' {{build `ID`}}",
-      "script": "scripts/install_apiban.sh"
-    },
-    {
-      "type": "shell",
       "execute_command": "chmod +x {{ .Path }}; sudo '{{ .Path }}' {{user `rtp_engine_version`}}",
       "script": "scripts/install_rtpengine.sh"
     },

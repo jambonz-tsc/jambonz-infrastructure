@@ -12,7 +12,7 @@ ExecStartPre=/bin/sh -c 'systemctl set-environment PUBLIC_IP=`curl -s http://169
 ExecStartPre=echo 'del 42' > /proc/rtpengine/control
 ExecStart=/usr/local/bin/rtpengine \
 --interface private/${LOCAL_IP} \
---interface public/${LOCAL_IP}!${PUBLIC_IP} \
+--interface public/${LOCAL_IP} \
 --listen-ng=22222 \
 --listen-http=8080 \
 --listen-udp=12222 \

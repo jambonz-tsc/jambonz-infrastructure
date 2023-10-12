@@ -1,6 +1,12 @@
 AWSTemplateFormatVersion: 2010-09-09
 
 Parameters:
+  ExistingVpcId:
+    Description: 'ID of the existing VPC in which to create the resources'
+    Type: 'AWS::EC2::VPC::Id'
+  ExistingSubnetId:
+    Description: 'ID of the existing Subnet in the VPC into which to place the resources'
+    Type: 'AWS::EC2::Subnet::Id'
   InstanceType:
     Description: jambonzMini EC2 instance type
     Type: String
@@ -55,35 +61,12 @@ Parameters:
     ConstraintDescription: must be a valid network CIDR
     AllowedPattern: \d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2}
     Default: 10.0.0.0/16
-  Cloudwatch:
-    Description: Send jambonz logs to cloudwatch
-    Type: String
-    Default: true
-    AllowedValues: [true, false]
-  CloudwatchLogRetention:
-    Description: "Number of days to retain cloudwatch logs"
-    Type: Number
-    Default: 3
-    AllowedValues:
-      - 1
-      - 3
-      - 5
-      - 7
-      - 14
-      - 30
-      - 60
-      - 90
-      - 120
-      - 150
   URLPortal:
     Type: String
     Description: "(Optional) A DNS name for the server (note: you must add a DNS A record in your DNS provider)"
     Default: ""
 
 Conditions:
-  ShouldEnableCloudWatch: !Equals
-    - true
-    - !Ref Cloudwatch
   DontCreateDNS: !Equals
     - !Ref URLPortal
     - ""
@@ -95,89 +78,32 @@ Conditions:
 Mappings:
   AWSRegion2AMI:
     us-east-1:
-      Ami: ami-03ad97025b54ac745
+      Ami: ami-0e8a4b550c34c0b08
+    us-east-2:
+      Ami: ami-01cc710e15f28a549
 
 Resources:
-  IamCloudwatchRole:
-    Type: AWS::IAM::Role
-    Condition: ShouldEnableCloudWatch
-    Properties: 
-      Description: jambonz mini IAM role
-      AssumeRolePolicyDocument:
-        Statement:
-        - Effect: Allow
-          Principal:
-            Service: [ec2.amazonaws.com]
-          Action: ['sts:AssumeRole']
-      Path: /
-      Policies:
-        - PolicyName: root 
-          PolicyDocument: 
-            Version: "2012-10-17"
-            Statement: 
-              - Effect: Allow
-                Action: 
-                  - 'cloudwatch:PutMetricData'
-                  - 'ec2:DescribeVolumes'
-                  - 'ec2:DescribeTags'
-                  - 'logs:PutLogEvents'
-                  - 'logs:DescribeLogStreams'
-                  - 'logs:DescribeLogGroups'
-                  - 'logs:CreateLogStream'
-                  - 'logs:CreateLogGroup'
-                Resource: '*'
-              - Effect: Allow
-                Action:
-                  - 'ssm:GetParameter'
-                Resource: 'arn:aws:ssm:*:*:parameter/AmazonCloudWatch-*'
-  VPC:
-    Type: 'AWS::EC2::VPC'
-    Properties:
-      EnableDnsSupport: true
-      EnableDnsHostnames: true
-      CidrBlock: !Ref VpcCidr
-  PublicSubnet:
-    Type: 'AWS::EC2::Subnet'
-    Properties:
-      VpcId: !Ref VPC
-      CidrBlock: !Ref VpcCidr
-  jambonzInstanceProfile:
-    Type: 'AWS::IAM::InstanceProfile'
-    Condition: ShouldEnableCloudWatch
-    Properties:
-      Path: /
-      Roles:
-        - !Ref IamCloudwatchRole
   jambonzInstance:
     Type: 'AWS::EC2::Instance'
     Properties:
       InstanceType: !Ref InstanceType
-      IamInstanceProfile: 
-        !If [ShouldEnableCloudWatch, !Ref jambonzInstanceProfile, !Ref "AWS::NoValue"]
       ImageId: !FindInMap [ "AWSRegion2AMI", !Ref AWS::Region,  "Ami"]
       KeyName: !Ref KeyName
       NetworkInterfaces:
         - GroupSet:
             - !Ref jambonzSecurityGroup
             - !Ref sshSecurityGroup
-          AssociatePublicIpAddress: true
           DeviceIndex: '0'
           DeleteOnTermination: true
-          SubnetId: !Ref PublicSubnet
+          SubnetId: !Ref ExistingSubnetId
       UserData:
         Fn::Base64: 
           Fn::Sub:
             - |
               #!/bin/bash -xe
 
-              #install rtpengine kernel module 
-              #echo "installing rtpengine kernel module"
-              #modprobe xt_RTPENGINE
-              #iptables -I INPUT -p udp -j RTPENGINE --id 42
-
               # get instance metadata
               PRIVATE_IPV4="$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)" 
-              PUBLIC_IPV4="$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)" 
               INSTANCE_ID="$(curl -s http://169.254.169.254/latest/meta-data/instance-id)" 
               AWS_REGION_NAME="$(curl -s http://169.254.169.254/latest/meta-data/placement/region)" 
               
@@ -189,7 +115,7 @@ Resources:
               # replace ip addresses in the ecosystem.config.js file
               sudo sed -i -e "s/\(.*\)PRIVATE_IP\(.*\)/\1$PRIVATE_IPV4\2/g" /home/admin/apps/ecosystem.config.js 
               sudo sed -i -e "s/\(.*\)AWS_REGION_NAME\(.*\)/\1$AWS_REGION_NAME\2/g" /home/admin/apps/ecosystem.config.js 
-              sudo sed -i -e "s/\(.*\)--JAMBONES_API_BASE_URL--\(.*\)/\1http:\/\/$PUBLIC_IPV4\/v1\2/g" /home/admin/apps/ecosystem.config.js 
+              sudo sed -i -e "s/\(.*\)--JAMBONES_API_BASE_URL--\(.*\)/\1http:\/\/$PRIVATE_IPV4\/v1\2/g" /home/admin/apps/ecosystem.config.js 
               
               # replace JWT_SECRET
               uuid=$(uuidgen)
@@ -201,8 +127,8 @@ Resources:
               # configure webapp
               if [[ -z "${URLPortal}" ]]; then
                 # portals will be accessed by IP address of server
-                echo "VITE_API_BASE_URL=http://$PUBLIC_IPV4/api/v1" > /home/admin/apps/jambonz-webapp/.env 
-                API_BASE_URL=http://$PUBLIC_IPV4/api/v1 TAG="<script>window.JAMBONZ = { API_BASE_URL: '$API_BASE_URL'};</script>"
+                echo "VITE_API_BASE_URL=http://$PRIVATE_IPV4/api/v1" > /home/admin/apps/jambonz-webapp/.env 
+                API_BASE_URL=http://$PRIVATE_IPV4/api/v1 TAG="<script>window.JAMBONZ = { API_BASE_URL: '$API_BASE_URL'};</script>"
                 sed -i -e "\@</head>@i\ $TAG" /home/admin/apps/jambonz-webapp/dist/index.html
               else
                 # portals will be accessed by DNS name
@@ -266,15 +192,7 @@ Resources:
               # restart heplify-server
               sudo systemctl restart heplify-server
 
-              # enable cloudwatch
-              if [[ "${Cloudwatch}" == "true" ]]; then
-                echo "Enabling Cloudwatch for jambonz logs"
-                sudo sed -i -e "s/retention_in_days\": 3/retention_in_days\": ${CloudwatchLogRetention}/g" /opt/aws/amazon-cloudwatch-agent/bin/config.json 
-                sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/bin/config.json
-              else
-                echo "Cloudwatch is not enabled for jambonz logs"
-                sudo sed -i -e "s/combine_logs: true/combine_logs: false/g" /home/admin/apps/ecosystem.config.js 
-              fi
+              sudo sed -i -e "s/combine_logs: true/combine_logs: false/g" /home/admin/apps/ecosystem.config.js 
               sudo -u admin bash -c "pm2 restart /home/admin/apps/ecosystem.config.js" 
               sudo -u admin bash -c "pm2 save"
               sudo env PATH=$PATH:/usr/bin /usr/lib/node_modules/pm2/bin/pm2 startup systemd -u admin --hp /home/admin
@@ -294,13 +212,11 @@ Resources:
               sudo /usr/local/bin/apiban/apiban-iptables-client FULL
               
             - URLPortal: !Ref URLPortal
-              Cloudwatch: !Ref Cloudwatch
-              CloudwatchLogRetention: !Ref CloudwatchLogRetention
 
   jambonzSecurityGroup:
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
-      VpcId: !Ref VPC
+      VpcId: !Ref ExistingVpcId
       GroupDescription: 'Allow sip, rtp, http and ssh access'
       SecurityGroupIngress:
         - Description: sip over udp
@@ -352,18 +268,16 @@ Resources:
           IpProtocol: tcp
           FromPort: 3020
           ToPort: 3020
-          CidrIp: !Ref VpcCidr
+          CidrIp: !Ref ExistingVpcIdCidr
       SecurityGroupEgress:
         - IpProtocol: -1
           FromPort: 0
           ToPort: 0
           CidrIp: 0.0.0.0/0
-    DependsOn:
-      - PublicRoute
   sshSecurityGroup:
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
-      VpcId: !Ref VPC
+      VpcId: !Ref ExistingVpcId
       GroupDescription: 'Allow sip, rtp, http and ssh access'
       SecurityGroupIngress:
         - Description: ssh
@@ -376,42 +290,6 @@ Resources:
           FromPort: 0
           ToPort: 0
           CidrIp: 0.0.0.0/0
-    DependsOn:
-      - PublicRoute
-  InternetGateway:
-    Type: 'AWS::EC2::InternetGateway'
-    Properties: {}
-  PublicRouteTable:
-    Type: 'AWS::EC2::RouteTable'
-    Properties:
-      VpcId: !Ref VPC
-  PublicRoute:
-    Type: 'AWS::EC2::Route'
-    Properties:
-      DestinationCidrBlock: 0.0.0.0/0
-      RouteTableId: !Ref PublicRouteTable
-      GatewayId: !Ref InternetGateway
-    DependsOn:
-      - VPCGatewayAttachment
-  VPCGatewayAttachment:
-    Type: 'AWS::EC2::VPCGatewayAttachment'
-    Properties:
-      InternetGatewayId: !Ref InternetGateway
-      VpcId: !Ref VPC
-  PublicSubnetRouteTableAssociation:
-    Type: 'AWS::EC2::SubnetRouteTableAssociation'
-    Properties:
-      RouteTableId: !Ref PublicRouteTable
-      SubnetId: !Ref PublicSubnet
-  EIP:
-    Type: 'AWS::EC2::EIP'
-    Properties:
-      Domain: vpc
-  EIPAssociation:
-    Type: 'AWS::EC2::EIPAssociation'
-    Properties:
-      InstanceId: !Ref jambonzInstance
-      AllocationId: !GetAtt EIP.AllocationId
 
 Outputs:
   PortalHttpURL:
