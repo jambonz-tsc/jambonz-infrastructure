@@ -18,7 +18,7 @@
     "install_cloudwatch":  "yes",
     "influxdb_ip":  "127.0.0.1",
     "distro": "debian-11",
-    "leave_source": "no"
+    "leave_source": "yes"
   },
   "builders": [{
     "type": "amazon-ebs",
@@ -26,10 +26,10 @@
     "source_ami_filter": {
       "filters": {
         "virtualization-type": "hvm",
-        "name": "jambonz-base-image-{{user `distro`}}",
+        "name": "debian-11-amd64-*",
         "root-device-type": "ebs"
       },
-      "owners": ["376029039784"],
+      "owners": ["136693071363"],
       "most_recent": true
     },
     "instance_type": "{{user `instance_type`}}",

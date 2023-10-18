@@ -1,6 +1,9 @@
 #!/bin/bash
 DISTRO=$1
 
+echo "uname -r: $(uname -r)"
+ls -lrt /lib/modules/
+
 sudo sed -i '/# End of file/i *                hard       nofile          65535'  /etc/security/limits.conf
 sudo sed -i '/# End of file/i *                soft       nofile          65535'  /etc/security/limits.conf
 sudo sed -i '/# End of file/i root             hard       nofile          65535'  /etc/security/limits.conf
