@@ -24,7 +24,7 @@ Parameters:
       - c5n.large
       - c5n.xlarge
       - c5n.2xlarge
-    ConstraintDescription: must be a valid EC2 instance type.
+    ConstraintDescription: must be a valid EC2 instance type..
   KeyName:
     Description: Name of an EC2 KeyPair to enable SSH access to the instance.
     Type: 'AWS::EC2::KeyPair::KeyName'
